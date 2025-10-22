@@ -3,31 +3,46 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no" />
-  <title>AR GPS Compass Demo — place object 1m south</title>
+  <title>AR GPS Direction Demo</title>
   <style>
-    html,body { height:100%; margin:0; font-family:system-ui,-apple-system,Segoe UI,Roboto,'Helvetica Neue',Arial; background:#111; color:#fff; }
+    html,body {
+      height:100%; margin:0; background:#111; color:#fff;
+      font-family:system-ui,-apple-system,Segoe UI,Roboto;
+    }
     #app { position:relative; height:100vh; overflow:hidden; }
     video#cam {
-      position: absolute;
-      inset:0;
-      width:100%;
-      height:100%;
+      position:absolute; inset:0;
+      width:100%; height:100%;
       object-fit:cover;
-      transform: scaleX(-1); /* mirror so it feels natural like camera preview */
       background:#000;
     }
     canvas#three { position:absolute; inset:0; pointer-events:none; }
     #hud {
-      position:absolute; left:12px; top:12px; padding:10px; background:rgba(0,0,0,0.4); border-radius:8px; backdrop-filter: blur(4px);
-      max-width:calc(100% - 24px);
+      position:absolute; left:12px; top:12px; background:rgba(0,0,0,0.4);
+      padding:10px 12px; border-radius:10px; backdrop-filter:blur(4px);
       font-size:14px;
     }
-    #controls { position:absolute; right:12px; top:12px; padding:10px; background:rgba(0,0,0,0.4); border-radius:8px; text-align:right; }
-    .big { font-weight:700; font-size:18px; }
-    #message { position:absolute; left:50%; bottom:24px; transform:translateX(-50%); padding:10px 16px; background:rgba(0,0,0,0.6); border-radius:20px; }
-    #startBtn { padding:10px 12px; border-radius:8px; border:none; background:#0b84ff; color:#fff; font-weight:600; cursor:pointer; }
-    small { color:#ddd; display:block; margin-top:6px; font-size:12px; }
-    #arrow { font-size:30px; margin-left:8px; display:inline-block; transform-origin:center; transition: transform .2s linear; }
+    #controls {
+      position:absolute; right:12px; top:12px; background:rgba(0,0,0,0.4);
+      padding:10px 12px; border-radius:10px;
+      text-align:right;
+    }
+    #startBtn {
+      padding:10px 14px; border:none; border-radius:8px;
+      background:#0078ff; color:#fff; font-weight:600; cursor:pointer;
+    }
+    #arrow {
+      position:absolute; left:50%; bottom:20%;
+      transform:translateX(-50%) rotate(0deg);
+      font-size:48px; color:#ff4747; text-shadow:0 0 10px #000;
+      transition:transform 0.1s linear;
+    }
+    #message {
+      position:absolute; bottom:10px; left:50%;
+      transform:translateX(-50%);
+      background:rgba(0,0,0,0.6); padding:8px 12px;
+      border-radius:20px; font-size:13px;
+    }
   </style>
 </head>
 <body>
@@ -36,322 +51,174 @@
     <canvas id="three"></canvas>
 
     <div id="hud">
-      <div><span class="big">Heading: </span><span id="heading">--</span>° <span id="cardinal"></span></div>
+      <div>Heading: <span id="heading">--</span>° (<span id="cardinal"></span>)</div>
       <div>Bearing to target: <span id="bearing">--</span>°</div>
-      <div>Distance to target: <span id="distance">--</span> m</div>
-      <div>Target coords: <span id="targetCoords">--</span></div>
-      <div>Current coords: <span id="currentCoords">--</span></div>
-      <small>Point your camera to the South (180°) — object will appear when you're facing it.</small>
+      <div>Distance: <span id="distance">--</span> m</div>
     </div>
 
     <div id="controls">
-      <button id="startBtn">Start AR (allow permissions)</button>
-      <div style="margin-top:8px">Status: <span id="status">idle</span></div>
-      <div style="margin-top:6px">Object visible: <strong id="visible">no</strong></div>
+      <button id="startBtn">Start AR</button>
+      <div style="margin-top:6px;">Status: <span id="status">idle</span></div>
     </div>
 
-    <div id="message">Tip: Open on mobile, allow camera & location & motion sensors. If device asks for "motion & orientation" permission, grant it.</div>
+    <div id="arrow">📍</div>
+    <div id="message">Rotate until the arrow points up — object is that way!</div>
   </div>
 
-  <!-- Three.js from CDN -->
   <script src="https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.min.js"></script>
 
   <script>
-  // -----------------------
-  // Helper: degrees/radians
-  const toRad = deg => deg * Math.PI/180;
-  const toDeg = rad => rad * 180/Math.PI;
+  const toRad = d => d * Math.PI / 180;
+  const toDeg = r => r * 180 / Math.PI;
 
-  // Haversine distance (meters)
-  function haversineDistance(lat1, lon1, lat2, lon2) {
-    const R = 6371000; // m
-    const dLat = toRad(lat2 - lat1);
-    const dLon = toRad(lon2 - lon1);
-    const a = Math.sin(dLat/2)*Math.sin(dLat/2) + Math.cos(toRad(lat1))*Math.cos(toRad(lat2)) * Math.sin(dLon/2)*Math.sin(dLon/2);
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-    return R * c;
+  function haversine(lat1, lon1, lat2, lon2) {
+    const R=6371000;
+    const dLat=toRad(lat2-lat1);
+    const dLon=toRad(lon2-lon1);
+    const a=Math.sin(dLat/2)**2+Math.cos(toRad(lat1))*Math.cos(toRad(lat2))*Math.sin(dLon/2)**2;
+    return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
   }
 
-  // Bearing from (lat1,lon1) to (lat2,lon2) in degrees (0..360, 0 = north)
-  function bearingTo(lat1, lon1, lat2, lon2) {
-    const φ1 = toRad(lat1), φ2 = toRad(lat2);
-    const Δλ = toRad(lon2 - lon1);
-    const y = Math.sin(Δλ) * Math.cos(φ2);
-    const x = Math.cos(φ1)*Math.sin(φ2) - Math.sin(φ1)*Math.cos(φ2)*Math.cos(Δλ);
-    const θ = Math.atan2(y, x);
-    return (toDeg(θ) + 360) % 360;
+  function bearingTo(lat1,lon1,lat2,lon2){
+    const φ1=toRad(lat1),φ2=toRad(lat2),Δλ=toRad(lon2-lon1);
+    const y=Math.sin(Δλ)*Math.cos(φ2);
+    const x=Math.cos(φ1)*Math.sin(φ2)-Math.sin(φ1)*Math.cos(φ2)*Math.cos(Δλ);
+    return (toDeg(Math.atan2(y,x))+360)%360;
   }
 
-  // Destination point given start lat/lon, bearing (degrees) and distance in meters
-  // Formula from: https://www.movable-type.co.uk/scripts/latlong.html
-  function destinationPoint(lat1, lon1, bearingDeg, distanceMeters) {
-    const R = 6371000; // m
-    const δ = distanceMeters / R; // angular distance in radians
-    const θ = toRad(bearingDeg);
-    const φ1 = toRad(lat1);
-    const λ1 = toRad(lon1);
-
-    const sinφ2 = Math.sin(φ1)*Math.cos(δ) + Math.cos(φ1)*Math.sin(δ)*Math.cos(θ);
-    const φ2 = Math.asin(sinφ2);
-    const y = Math.sin(θ)*Math.sin(δ)*Math.cos(φ1);
-    const x = Math.cos(δ) - Math.sin(φ1)*Math.sin(φ2);
-    const λ2 = λ1 + Math.atan2(y, x);
-
-    return { lat: toDeg(φ2), lon: (toDeg(λ2)+540)%360 - 180 }; // normalise lon
+  function destPoint(lat1,lon1,bearing,dist){
+    const R=6371000,δ=dist/R,θ=toRad(bearing);
+    const φ1=toRad(lat1),λ1=toRad(lon1);
+    const φ2=Math.asin(Math.sin(φ1)*Math.cos(δ)+Math.cos(φ1)*Math.sin(δ)*Math.cos(θ));
+    const λ2=λ1+Math.atan2(Math.sin(θ)*Math.sin(δ)*Math.cos(φ1),Math.cos(δ)-Math.sin(φ1)*Math.sin(φ2));
+    return {lat:toDeg(φ2),lon:(toDeg(λ2)+540)%360-180};
   }
 
-  // Cardinal from degrees
-  function cardinalFromDeg(d) {
-    const dirs = ['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW'];
-    return dirs[Math.round(((d % 360) / 22.5)) % 16];
-  }
+  const headingEl=document.getElementById('heading');
+  const bearingEl=document.getElementById('bearing');
+  const distanceEl=document.getElementById('distance');
+  const cardinalEl=document.getElementById('cardinal');
+  const arrow=document.getElementById('arrow');
+  const statusEl=document.getElementById('status');
+  const startBtn=document.getElementById('startBtn');
+  const video=document.getElementById('cam');
 
-  // DOM elements
-  const video = document.getElementById('cam');
-  const startBtn = document.getElementById('startBtn');
-  const headingEl = document.getElementById('heading');
-  const cardinalEl = document.getElementById('cardinal');
-  const bearingEl = document.getElementById('bearing');
-  const distanceEl = document.getElementById('distance');
-  const targetCoordsEl = document.getElementById('targetCoords');
-  const currentCoordsEl = document.getElementById('currentCoords');
-  const statusEl = document.getElementById('status');
-  const visibleEl = document.getElementById('visible');
+  let deviceHeading=null,currentPos=null,target=null,lastSpoken=false;
+  let cube,scene,camera,renderer;
 
-  // State
-  let currentPos = null;
-  let targetPos = null;
-  let watchId = null;
-  let deviceHeading = null; // 0..360 degrees, 0 = north
-  let threeScene, threeCamera, threeRenderer, cube;
-  let lastSpoken = false;
+  function initThree(){
+    const canvas=document.getElementById('three');
+    renderer=new THREE.WebGLRenderer({canvas,alpha:true});
+    renderer.setSize(innerWidth,innerHeight);
+    scene=new THREE.Scene();
+    camera=new THREE.PerspectiveCamera(60,innerWidth/innerHeight,0.1,1000);
+    camera.position.z=5;
 
-  // Three.js setup (transparent canvas overlay)
-  function initThree() {
-    const canvas = document.getElementById('three');
-    threeRenderer = new THREE.WebGLRenderer({ canvas: canvas, alpha: true, antialias: true });
-    threeRenderer.setPixelRatio(window.devicePixelRatio);
-    threeRenderer.setSize(window.innerWidth, window.innerHeight);
+    const geo=new THREE.BoxGeometry(1,1,1);
+    const mat=new THREE.MeshStandardMaterial({color:0x00ccff,transparent:true,opacity:0.9});
+    cube=new THREE.Mesh(geo,mat);
+    cube.visible=false;
+    scene.add(cube);
 
-    threeScene = new THREE.Scene();
-    // Camera for 2D overlay-like placement
-    threeCamera = new THREE.PerspectiveCamera(50, window.innerWidth/window.innerHeight, 0.1, 1000);
-    threeCamera.position.z = 5;
+    const light=new THREE.DirectionalLight(0xffffff,1);
+    light.position.set(2,2,3);
+    scene.add(light);
+    scene.add(new THREE.AmbientLight(0xffffff,0.6));
 
-    // simple cube
-    const geometry = new THREE.BoxGeometry(1,1,1);
-    const material = new THREE.MeshStandardMaterial({ color: 0x00ccff, metalness:0.1, roughness:0.6, transparent:true, opacity:0.95 });
-    cube = new THREE.Mesh(geometry, material);
-    cube.visible = false;
-    threeScene.add(cube);
-
-    const light = new THREE.DirectionalLight(0xffffff, 1.0);
-    light.position.set(1,2,3);
-    threeScene.add(light);
-    threeScene.add(new THREE.AmbientLight(0x404040, 0.9));
-
-    window.addEventListener('resize', () => {
-      threeCamera.aspect = window.innerWidth/window.innerHeight;
-      threeCamera.updateProjectionMatrix();
-      threeRenderer.setSize(window.innerWidth, window.innerHeight);
+    window.addEventListener('resize',()=>{
+      camera.aspect=innerWidth/innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(innerWidth,innerHeight);
     });
   }
 
-  // Place cube at center when visible; scale with distance (closer => larger)
-  function updateThree(distanceMeters, isVisible) {
-    if (!cube) return;
-    if (isVisible) {
-      cube.visible = true;
-      // put cube centered on screen by setting position in camera space
-      cube.position.set(0, -0.3, - (1 + Math.max(0.2, Math.min(6, distanceMeters/2))) ); // z negative moves forward in front of camera
-      // scale inversely to distance (clamp)
-      const s = Math.max(0.2, 2.5 / Math.max(0.5, distanceMeters));
-      cube.scale.setScalar(s);
-      visibleEl.textContent = 'yes';
-    } else {
-      cube.visible = false;
-      visibleEl.textContent = 'no';
-    }
-    threeRenderer.render(threeScene, threeCamera);
+  function speakOnce(txt){
+    if(lastSpoken)return;
+    window.speechSynthesis.speak(new SpeechSynthesisUtterance(txt));
+    lastSpoken=true;
   }
 
-  // Speech helper (safeguard to speak only once per arrival)
-  function speakOnce(text) {
-    if (lastSpoken) return;
-    if (!('speechSynthesis' in window)) return;
-    const u = new SpeechSynthesisUtterance(text);
-    u.rate = 1;
-    window.speechSynthesis.speak(u);
-    lastSpoken = true;
+  async function startCamera(){
+    const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:"environment"}});
+    video.srcObject=stream;
   }
 
-  // Request camera
-  async function startCamera() {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: false,
-        video: { facingMode: { ideal: "environment" } }
+  function startCompass(){
+    if(typeof DeviceOrientationEvent!=='undefined' && typeof DeviceOrientationEvent.requestPermission==='function'){
+      DeviceOrientationEvent.requestPermission().then(res=>{
+        if(res==='granted')window.addEventListener('deviceorientation',handleOrientation);
       });
-      video.srcObject = stream;
-      await video.play();
-    } catch (err) {
-      alert('Camera error: ' + err.message + '\nMake sure you allowed camera permission and are on HTTPS.');
-      throw err;
+    }else{
+      window.addEventListener('deviceorientationabsolute' in window?'deviceorientationabsolute':'deviceorientation',handleOrientation);
     }
   }
 
-  // Setup device orientation (compass heading)
-  function startCompass() {
-    // On iOS 13+ we need to request permission by calling DeviceOrientationEvent.requestPermission()
-    if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
-      // iOS
-      DeviceOrientationEvent.requestPermission().then(response => {
-        if (response === 'granted') {
-          window.addEventListener('deviceorientation', handleOrientation, true);
-        } else {
-          alert('Permission denied for device orientation. Compass will not work.');
-        }
-      }).catch(err => {
-        console.warn('DeviceOrientation permission error', err);
-        alert('Device orientation permission error: ' + err);
-      });
-    } else {
-      // Android / other
-      window.addEventListener('deviceorientationabsolute' in window ? 'deviceorientationabsolute' : 'deviceorientation', handleOrientation, true);
+  function handleOrientation(e){
+    let h=null;
+    if(e.webkitCompassHeading!==undefined){ h=e.webkitCompassHeading; }
+    else if(e.alpha!==null){ h=360-e.alpha; }
+    if(h!==null){
+      deviceHeading=(h+360)%360;
+      headingEl.textContent=deviceHeading.toFixed(0);
+      const dirs=['N','NE','E','SE','S','SW','W','NW'];
+      cardinalEl.textContent=dirs[Math.round(deviceHeading/45)%8];
     }
   }
 
-  // Compute heading from deviceorientation event
-  function handleOrientation(e) {
-    // Some browsers provide webkitCompassHeading, otherwise compute from alpha
-    let heading = null;
-    if (e.webkitCompassHeading !== undefined) {
-      heading = e.webkitCompassHeading; // iOS
-    } else if (e.absolute === true || e.absolute === undefined) {
-      // Use alpha; note: depends on device/browser providing absolute orientation
-      // alpha is device rotation around z axis (0 = device's top to North on some devices)
-      if (e.alpha !== null) {
-        // Alpha is degrees clockwise from the device's reference frame
-        // Convert to compass heading:
-        // Some devices may need correction for screen orientation; for simplicity we use alpha directly
-        heading = 360 - e.alpha; // convert to compass-like (0 = North)
-      }
-    }
-    if (heading !== null) {
-      heading = (heading + 360) % 360;
-      deviceHeading = heading;
-      headingEl.textContent = heading.toFixed(0);
-      cardinalEl.textContent = cardinalFromDeg(heading);
-    }
+  function updateArrow(bearing){
+    if(deviceHeading==null)return;
+    let diff=(bearing-deviceHeading+360)%360;
+    arrow.style.transform=`translateX(-50%) rotate(${diff}deg)`;
   }
 
-  // Calculate everything: bearing to target, distance, decide visibility
-  function evaluateAndRender() {
-    if (!currentPos || !targetPos) {
-      updateThree(10, false);
-      return;
+  function updateThree(dist,visible){
+    cube.visible=visible;
+    if(visible){
+      cube.position.set(0,-0.3,-(1+Math.min(6,dist/2)));
+      cube.scale.setScalar(Math.max(0.2,2.5/Math.max(0.5,dist)));
     }
-    const lat1 = currentPos.coords.latitude, lon1 = currentPos.coords.longitude;
-    const lat2 = targetPos.lat, lon2 = targetPos.lon;
-    const dist = haversineDistance(lat1, lon1, lat2, lon2);
-    const bear = bearingTo(lat1, lon1, lat2, lon2); // 0..360
-
-    distanceEl.textContent = dist.toFixed(2);
-    bearingEl.textContent = bear.toFixed(0);
-    targetCoordsEl.textContent = `${lat2.toFixed(6)}, ${lon2.toFixed(6)}`;
-    currentCoordsEl.textContent = `${lat1.toFixed(6)}, ${lon1.toFixed(6)}`;
-
-    // decide if user is facing the target
-    let isFacing = false;
-    if (deviceHeading !== null) {
-      let diff = Math.abs(((bear - deviceHeading + 540) % 360) - 180) - 180; // normalized
-      diff = Math.abs(((bear - deviceHeading + 540) % 360) - 180) - 180; // alternative not reliable; simpler:
-      // simpler compute smallest angle:
-      let a = Math.abs(bear - deviceHeading);
-      if (a > 180) a = 360 - a;
-      const ANGLE_TOL = 15; // degrees tolerance
-      isFacing = (a <= ANGLE_TOL);
-    }
-
-    // show cube only if facing target and not too far (we still show if far but scaled)
-    updateThree(dist, isFacing);
-
-    // arrival check: within 1.5 meters
-    if (dist <= 1.5) {
-      statusEl.textContent = 'arrived';
-      speakOnce('Hi, how are you');
-    } else {
-      statusEl.textContent = 'tracking';
-    }
+    renderer.render(scene,camera);
   }
 
-  // Watch geolocation
-  function startGeolocation() {
-    if (!('geolocation' in navigator)) {
-      alert('Geolocation not supported.');
-      return;
-    }
-    // get current position once to compute target 1 meter south
-    navigator.geolocation.getCurrentPosition(pos => {
-      currentPos = pos;
-      const lat = pos.coords.latitude, lon = pos.coords.longitude;
-      // Target: 1 meter south -> bearing 180 degrees
-      const tgt = destinationPoint(lat, lon, 180, 1.0);
-      targetPos = tgt;
-      targetCoordsEl.textContent = `${tgt.lat.toFixed(6)}, ${tgt.lon.toFixed(6)}`;
-      // start continuous watch
-      if (watchId === null) {
-        watchId = navigator.geolocation.watchPosition(p => {
-          currentPos = p;
-        }, err => {
-          console.warn('watchPosition error', err);
-        }, { enableHighAccuracy: true, maximumAge: 1000, timeout: 5000 });
-      }
-    }, err => {
-      alert('Error getting current position: ' + err.message + '\nAllow location permission and ensure HTTPS.');
-    }, { enableHighAccuracy: true, maximumAge: 0, timeout: 10000});
+  function startGeo(){
+    navigator.geolocation.getCurrentPosition(pos=>{
+      currentPos=pos;
+      target=destPoint(pos.coords.latitude,pos.coords.longitude,180,1);
+      navigator.geolocation.watchPosition(p=>currentPos=p,()=>{}, {enableHighAccuracy:true});
+    });
   }
 
-  // Animation loop
-  function loop() {
+  function loop(){
     requestAnimationFrame(loop);
-    evaluateAndRender();
-  }
+    if(!currentPos||!target){updateThree(10,false);return;}
+    const lat1=currentPos.coords.latitude,lon1=currentPos.coords.longitude;
+    const lat2=target.lat,lon2=target.lon;
+    const dist=haversine(lat1,lon1,lat2,lon2);
+    const bear=bearingTo(lat1,lon1,lat2,lon2);
+    distanceEl.textContent=dist.toFixed(2);
+    bearingEl.textContent=bear.toFixed(0);
+    updateArrow(bear);
 
-  // Start everything after user gesture
-  async function startAll() {
-    startBtn.disabled = true;
-    startBtn.textContent = 'Starting...';
-    try {
-      await startCamera();
-      initThree();
-      startCompass();
-      startGeolocation();
-      startBtn.style.display = 'none';
-      statusEl.textContent = 'started';
-      loop();
-    } catch (e) {
-      console.error(e);
-      statusEl.textContent = 'error';
-      startBtn.disabled = false;
-      startBtn.textContent = 'Start AR (allow permissions)';
+    let facing=false;
+    if(deviceHeading!=null){
+      let diff=Math.abs(bear-deviceHeading);
+      if(diff>180)diff=360-diff;
+      facing=diff<15;
     }
+    updateThree(dist,facing);
+
+    if(dist<0.5){statusEl.textContent='arrived';speakOnce('Hi, how are you');}
+    else statusEl.textContent='tracking';
   }
 
-  // User must click to begin (for iOS orientation permission & autoplay)
-  startBtn.addEventListener('click', async () => {
-    // For speech to work reliably, call a short silent utterance on some browsers (optional)
-    try {
-      if ('speechSynthesis' in window) {
-        const u = new SpeechSynthesisUtterance(''); // silent or short
-        window.speechSynthesis.speak(u);
-      }
-    } catch(e){}
-    await startAll();
+  startBtn.addEventListener('click',async()=>{
+    await startCamera();
+    initThree();
+    startCompass();
+    startGeo();
+    startBtn.style.display='none';
+    loop();
   });
-
-  // For debugging: allow manual recalculation of target (button could be added)
-  // End of script
   </script>
 </body>
 </html>
