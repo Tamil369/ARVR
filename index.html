@@ -1,224 +1,106 @@
-<!doctype html>
-<html lang="en">
+<!DOCTYPE html>
+<html>
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no" />
-  <title>AR GPS Direction Demo</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Geo Direction AR</title>
   <style>
-    html,body {
-      height:100%; margin:0; background:#111; color:#fff;
-      font-family:system-ui,-apple-system,Segoe UI,Roboto;
-    }
-    #app { position:relative; height:100vh; overflow:hidden; }
-    video#cam {
-      position:absolute; inset:0;
-      width:100%; height:100%;
-      object-fit:cover;
-      background:#000;
-    }
-    canvas#three { position:absolute; inset:0; pointer-events:none; }
+    body { margin: 0; overflow: hidden; background: #000; color: white; font-family: sans-serif; }
     #hud {
-      position:absolute; left:12px; top:12px; background:rgba(0,0,0,0.4);
-      padding:10px 12px; border-radius:10px; backdrop-filter:blur(4px);
-      font-size:14px;
-    }
-    #controls {
-      position:absolute; right:12px; top:12px; background:rgba(0,0,0,0.4);
-      padding:10px 12px; border-radius:10px;
-      text-align:right;
-    }
-    #startBtn {
-      padding:10px 14px; border:none; border-radius:8px;
-      background:#0078ff; color:#fff; font-weight:600; cursor:pointer;
-    }
-    #arrow {
-      position:absolute; left:50%; bottom:20%;
-      transform:translateX(-50%) rotate(0deg);
-      font-size:48px; color:#ff4747; text-shadow:0 0 10px #000;
-      transition:transform 0.1s linear;
-    }
-    #message {
-      position:absolute; bottom:10px; left:50%;
-      transform:translateX(-50%);
-      background:rgba(0,0,0,0.6); padding:8px 12px;
-      border-radius:20px; font-size:13px;
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      background: rgba(0,0,0,0.4);
+      padding: 10px 15px;
+      border-radius: 8px;
+      font-size: 18px;
     }
   </style>
 </head>
 <body>
-  <div id="app">
-    <video id="cam" autoplay playsinline></video>
-    <canvas id="three"></canvas>
+<div id="hud">
+  <div>Heading: <span id="heading">0</span>°</div>
+  <div>Direction: <span id="dir">N</span></div>
+</div>
 
-    <div id="hud">
-      <div>Heading: <span id="heading">--</span>° (<span id="cardinal"></span>)</div>
-      <div>Bearing to target: <span id="bearing">--</span>°</div>
-      <div>Distance: <span id="distance">--</span> m</div>
-    </div>
+<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
 
-    <div id="controls">
-      <button id="startBtn">Start AR</button>
-      <div style="margin-top:6px;">Status: <span id="status">idle</span></div>
-    </div>
+<script>
+let camera, scene, renderer, arrow;
+let targetCoords = { lat: 13.0827, lon: 80.2707 }; // 🎯 Chennai example
+let headingDisplay = document.getElementById('heading');
+let dirDisplay = document.getElementById('dir');
 
-    <div id="arrow">📍</div>
-    <div id="message">Rotate until the arrow points up — object is that way!</div>
-  </div>
+// Convert degrees to radians
+function toRad(deg) { return deg * Math.PI / 180; }
+function toDeg(rad) { return rad * 180 / Math.PI; }
 
-  <script src="https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.min.js"></script>
+function init() {
+  scene = new THREE.Scene();
+  camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 1, 10000);
+  renderer = new THREE.WebGLRenderer({ alpha: true });
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  document.body.appendChild(renderer.domElement);
 
-  <script>
-  const toRad = d => d * Math.PI / 180;
-  const toDeg = r => r * 180 / Math.PI;
+  // 3D Arrow pointing in Z direction
+  const geometry = new THREE.ConeGeometry(0.5, 1.5, 32);
+  const material = new THREE.MeshBasicMaterial({ color: 0x00ff00 });
+  arrow = new THREE.Mesh(geometry, material);
+  arrow.rotation.x = Math.PI; // point forward
+  scene.add(arrow);
 
-  function haversine(lat1, lon1, lat2, lon2) {
-    const R=6371000;
-    const dLat=toRad(lat2-lat1);
-    const dLon=toRad(lon2-lon1);
-    const a=Math.sin(dLat/2)**2+Math.cos(toRad(lat1))*Math.cos(toRad(lat2))*Math.sin(dLon/2)**2;
-    return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
-  }
+  camera.position.set(0, 0, 0);
+  animate();
+}
 
-  function bearingTo(lat1,lon1,lat2,lon2){
-    const φ1=toRad(lat1),φ2=toRad(lat2),Δλ=toRad(lon2-lon1);
-    const y=Math.sin(Δλ)*Math.cos(φ2);
-    const x=Math.cos(φ1)*Math.sin(φ2)-Math.sin(φ1)*Math.cos(φ2)*Math.cos(Δλ);
-    return (toDeg(Math.atan2(y,x))+360)%360;
-  }
+function animate() {
+  requestAnimationFrame(animate);
+  renderer.render(scene, camera);
+}
 
-  function destPoint(lat1,lon1,bearing,dist){
-    const R=6371000,δ=dist/R,θ=toRad(bearing);
-    const φ1=toRad(lat1),λ1=toRad(lon1);
-    const φ2=Math.asin(Math.sin(φ1)*Math.cos(δ)+Math.cos(φ1)*Math.sin(δ)*Math.cos(θ));
-    const λ2=λ1+Math.atan2(Math.sin(θ)*Math.sin(δ)*Math.cos(φ1),Math.cos(δ)-Math.sin(φ1)*Math.sin(φ2));
-    return {lat:toDeg(φ2),lon:(toDeg(λ2)+540)%360-180};
-  }
+// Compute bearing from current GPS to target GPS
+function bearingToTarget(lat1, lon1, lat2, lon2) {
+  const φ1 = toRad(lat1);
+  const φ2 = toRad(lat2);
+  const Δλ = toRad(lon2 - lon1);
+  const y = Math.sin(Δλ) * Math.cos(φ2);
+  const x = Math.cos(φ1)*Math.sin(φ2) - Math.sin(φ1)*Math.cos(φ2)*Math.cos(Δλ);
+  let θ = Math.atan2(y, x);
+  return (toDeg(θ) + 360) % 360; // 0–360°
+}
 
-  const headingEl=document.getElementById('heading');
-  const bearingEl=document.getElementById('bearing');
-  const distanceEl=document.getElementById('distance');
-  const cardinalEl=document.getElementById('cardinal');
-  const arrow=document.getElementById('arrow');
-  const statusEl=document.getElementById('status');
-  const startBtn=document.getElementById('startBtn');
-  const video=document.getElementById('cam');
+// Convert heading to compass name
+function compassName(deg) {
+  const dirs = ['N','NE','E','SE','S','SW','W','NW','N'];
+  return dirs[Math.round(deg / 45)];
+}
 
-  let deviceHeading=null,currentPos=null,target=null,lastSpoken=false;
-  let cube,scene,camera,renderer;
+let currentBearing = 0;
 
-  function initThree(){
-    const canvas=document.getElementById('three');
-    renderer=new THREE.WebGLRenderer({canvas,alpha:true});
-    renderer.setSize(innerWidth,innerHeight);
-    scene=new THREE.Scene();
-    camera=new THREE.PerspectiveCamera(60,innerWidth/innerHeight,0.1,1000);
-    camera.position.z=5;
+function updatePosition(pos) {
+  const lat = pos.coords.latitude;
+  const lon = pos.coords.longitude;
+  currentBearing = bearingToTarget(lat, lon, targetCoords.lat, targetCoords.lon);
+}
 
-    const geo=new THREE.BoxGeometry(1,1,1);
-    const mat=new THREE.MeshStandardMaterial({color:0x00ccff,transparent:true,opacity:0.9});
-    cube=new THREE.Mesh(geo,mat);
-    cube.visible=false;
-    scene.add(cube);
+// Update arrow direction and HUD
+function handleOrientation(e) {
+  let heading = e.webkitCompassHeading || (360 - e.alpha); // iOS or Android
+  if (heading < 0) heading += 360;
+  headingDisplay.textContent = heading.toFixed(0);
+  dirDisplay.textContent = compassName(heading);
 
-    const light=new THREE.DirectionalLight(0xffffff,1);
-    light.position.set(2,2,3);
-    scene.add(light);
-    scene.add(new THREE.AmbientLight(0xffffff,0.6));
+  // Rotate arrow toward target direction
+  let diff = currentBearing - heading;
+  arrow.rotation.y = toRad(diff);
+}
 
-    window.addEventListener('resize',()=>{
-      camera.aspect=innerWidth/innerHeight;
-      camera.updateProjectionMatrix();
-      renderer.setSize(innerWidth,innerHeight);
-    });
-  }
+if (navigator.geolocation) {
+  navigator.geolocation.watchPosition(updatePosition);
+}
+window.addEventListener('deviceorientationabsolute', handleOrientation, true);
+window.addEventListener('deviceorientation', handleOrientation, true);
 
-  function speakOnce(txt){
-    if(lastSpoken)return;
-    window.speechSynthesis.speak(new SpeechSynthesisUtterance(txt));
-    lastSpoken=true;
-  }
-
-  async function startCamera(){
-    const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:"environment"}});
-    video.srcObject=stream;
-  }
-
-  function startCompass(){
-    if(typeof DeviceOrientationEvent!=='undefined' && typeof DeviceOrientationEvent.requestPermission==='function'){
-      DeviceOrientationEvent.requestPermission().then(res=>{
-        if(res==='granted')window.addEventListener('deviceorientation',handleOrientation);
-      });
-    }else{
-      window.addEventListener('deviceorientationabsolute' in window?'deviceorientationabsolute':'deviceorientation',handleOrientation);
-    }
-  }
-
-  function handleOrientation(e){
-    let h=null;
-    if(e.webkitCompassHeading!==undefined){ h=e.webkitCompassHeading; }
-    else if(e.alpha!==null){ h=360-e.alpha; }
-    if(h!==null){
-      deviceHeading=(h+360)%360;
-      headingEl.textContent=deviceHeading.toFixed(0);
-      const dirs=['N','NE','E','SE','S','SW','W','NW'];
-      cardinalEl.textContent=dirs[Math.round(deviceHeading/45)%8];
-    }
-  }
-
-  function updateArrow(bearing){
-    if(deviceHeading==null)return;
-    let diff=(bearing-deviceHeading+360)%360;
-    arrow.style.transform=`translateX(-50%) rotate(${diff}deg)`;
-  }
-
-  function updateThree(dist,visible){
-    cube.visible=visible;
-    if(visible){
-      cube.position.set(0,-0.3,-(1+Math.min(6,dist/2)));
-      cube.scale.setScalar(Math.max(0.2,2.5/Math.max(0.5,dist)));
-    }
-    renderer.render(scene,camera);
-  }
-
-  function startGeo(){
-    navigator.geolocation.getCurrentPosition(pos=>{
-      currentPos=pos;
-      target=destPoint(pos.coords.latitude,pos.coords.longitude,180,1);
-      navigator.geolocation.watchPosition(p=>currentPos=p,()=>{}, {enableHighAccuracy:true});
-    });
-  }
-
-  function loop(){
-    requestAnimationFrame(loop);
-    if(!currentPos||!target){updateThree(10,false);return;}
-    const lat1=currentPos.coords.latitude,lon1=currentPos.coords.longitude;
-    const lat2=target.lat,lon2=target.lon;
-    const dist=haversine(lat1,lon1,lat2,lon2);
-    const bear=bearingTo(lat1,lon1,lat2,lon2);
-    distanceEl.textContent=dist.toFixed(2);
-    bearingEl.textContent=bear.toFixed(0);
-    updateArrow(bear);
-
-    let facing=false;
-    if(deviceHeading!=null){
-      let diff=Math.abs(bear-deviceHeading);
-      if(diff>180)diff=360-diff;
-      facing=diff<15;
-    }
-    updateThree(dist,facing);
-
-    if(dist<0.5){statusEl.textContent='arrived';speakOnce('Hi, how are you');}
-    else statusEl.textContent='tracking';
-  }
-
-  startBtn.addEventListener('click',async()=>{
-    await startCamera();
-    initThree();
-    startCompass();
-    startGeo();
-    startBtn.style.display='none';
-    loop();
-  });
-  </script>
+init();
+</script>
 </body>
 </html>
